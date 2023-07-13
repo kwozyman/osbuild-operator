@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	osbuildv1alpha1 "github.com/kwozyman/osbuild-operator/api/v1alpha1"
+	//v1 "k8s.io/api/core/v1"
 )
 
 // ImageBuilderReconciler reconciles a ImageBuilder object
@@ -49,6 +50,17 @@ type ImageBuilderReconciler struct {
 func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("hello operator")
+
+	var imageBuilder osbuildv1alpha1.ImageBuilder
+	if err := r.Get(ctx, req.NamespacedName, &imageBuilder); err != nil {
+		logger.Error(err, "Unable to fetch ImageBuilder")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if imageBuilder.Spec.SubscriptionSecret == nil {
+		logger.Info("spec.subscriptionSecret is not set, using osbuild-subscription-secret")
+
+	}
 
 	return ctrl.Result{}, nil
 }
