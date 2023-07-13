@@ -1,0 +1,32 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - osbuild.rh-ecosystem-edge.io
+  resources:
+  - imagebuilders
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - osbuild.rh-ecosystem-edge.io
+  resources:
+  - imagebuilders/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - osbuild.rh-ecosystem-edge.io
+  resources:
+  - imagebuilders/status
+  verbs:
+  - get
+  - patch
+  - update
