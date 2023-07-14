@@ -18,9 +18,9 @@ package controller
 
 import (
 	"context"
-	//"encoding/base64"
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,6 +28,10 @@ import (
 
 	osbuildv1alpha1 "github.com/kwozyman/osbuild-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
+	kubevirt "kubevirt.io/api/core/v1"
+	"kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 )
 
 const defaultSubscriptionSecretName = "osbuild-subscription-secret"
@@ -69,7 +73,6 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		subscriptionSecretName = imageBuilder.Spec.SubscriptionSecretName
 	}
 	logger.Info(subscriptionSecretName)
-
 	subscriptionSecret := &corev1.Secret{}
 
 	err := r.Get(ctx, client.ObjectKey{
@@ -81,7 +84,148 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	logger.Info("Building VM object")
+	vm := r.createVM(ctx, subscriptionSecretName, imageBuilder.Name, imageBuilder.Namespace)
+	logger.Info("Creating VM object")
+
+	if err := r.Create(ctx, &vm); err != nil {
+		logger.Error(err, "Could not create VM")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *ImageBuilderReconciler) createVM(ctx context.Context, subSecret string, name string, namespace string) kubevirt.VirtualMachine {
+	logger := log.FromContext(ctx)
+	rootVolumeName := fmt.Sprintf("%s-vm-volume", name)
+	logger.Info("built rootVolumeName")
+
+	dataVolumeTemplateSpec := kubevirt.DataVolumeTemplateSpec{}
+	dataVolumeTemplateSpec.Kind = "DataVolume"
+	dataVolumeTemplateSpec.Name = rootVolumeName
+	dataVolumeTemplateSpec.Spec.SourceRef = &v1beta1.DataVolumeSourceRef{
+		Kind: "DataSource",
+	}
+	dataVolumeTemplateSpec.Spec.SourceRef.Name = "rhel9"
+	dataVolumeTemplateSpecNamespace := "openshift-virtualization-os-images"
+	dataVolumeTemplateSpec.Spec.SourceRef.Namespace = &dataVolumeTemplateSpecNamespace
+
+	/*dataVolumeTemplateSpec.Spec.Storage.Resources = corev1.ResourceRequirements{
+		Requests: map[corev1.ResourceName]resource.Quantity{
+			corev1.ResourceStorage: resource.MustParse("30Gi"),
+		},
+	}*/
+	dataVolumeTemplateSpec.Spec.Storage = &v1beta1.StorageSpec{
+		Resources: corev1.ResourceRequirements{
+			Requests: map[corev1.ResourceName]resource.Quantity{
+				corev1.ResourceStorage: resource.MustParse("30Gi"),
+			},
+		},
+	}
+
+	vmInstanceTemplateSpec := kubevirt.VirtualMachineInstanceTemplateSpec{}
+	vmInstanceTemplateSpec.ObjectMeta.Labels = map[string]string{
+		"eci": fmt.Sprintf("%s-image-builder", name),
+	}
+	vmInstanceTemplateSpec.ObjectMeta.Annotations = map[string]string{
+		"vm.kubevirt.io/flavor":   "small",
+		"vm.kubevirt.io/os":       "rhel9",
+		"vm.kubevirt.io/workload": "server",
+	}
+	vmInstanceTemplateSpec.Spec.Domain.CPU = &kubevirt.CPU{
+		Cores:   2,
+		Sockets: 1,
+		Threads: 1,
+	}
+
+	vmInstanceTemplateSpec.Spec.Domain.Resources = kubevirt.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("4Gi"),
+		},
+	}
+
+	vmInstanceTemplateSpec.Spec.Domain.Firmware = &kubevirt.Firmware{
+		Bootloader: &kubevirt.Bootloader{
+			EFI: &kubevirt.EFI{},
+		},
+	}
+
+	vmInstanceTemplateSpec.Spec.Domain.Devices = kubevirt.Devices{
+		Disks: []kubevirt.Disk{
+			{
+				Name: "rootdisk",
+				DiskDevice: kubevirt.DiskDevice{
+					Disk: &kubevirt.DiskTarget{
+						Bus: kubevirt.DiskBusVirtio,
+					},
+				},
+			},
+			{
+				Name: "cloudinitdisk",
+				DiskDevice: kubevirt.DiskDevice{
+					Disk: &kubevirt.DiskTarget{
+						Bus: kubevirt.DiskBusVirtio,
+					},
+				},
+			},
+		},
+		Interfaces: []kubevirt.Interface{
+			{
+				Name:  "default",
+				Model: "virtio",
+				InterfaceBindingMethod: kubevirt.InterfaceBindingMethod{
+					Masquerade: &kubevirt.InterfaceMasquerade{},
+				},
+			},
+		},
+		NetworkInterfaceMultiQueue: pointer.Bool(true),
+		Rng:                        &kubevirt.Rng{},
+	}
+
+	vmInstanceTemplateSpec.Spec.Networks = []kubevirt.Network{
+		{
+			Name: "default",
+		},
+	}
+
+	vmInstanceTemplateSpec.Spec.Volumes = []kubevirt.Volume{
+		{
+			Name: "rootdisk",
+			VolumeSource: kubevirt.VolumeSource{
+				DataVolume: &kubevirt.DataVolumeSource{
+					Name: rootVolumeName,
+				},
+			},
+		},
+		// {
+		// 	Name: "cloudinitdisk",
+		// 	VolumeSource: kubevirt.VolumeSource{
+		// 		CloudInitNoCloud: &kubevirt.CloudInitNoCloudSource{
+		// 			UserData: cloudInitData,
+		// 		},
+		// 	},
+		// },
+	}
+
+	vmInstace := kubevirt.VirtualMachine{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "kubevirt.io/v1",
+			Kind:       "VirtualMachine",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: kubevirt.VirtualMachineSpec{
+			DataVolumeTemplates: []kubevirt.DataVolumeTemplateSpec{
+				dataVolumeTemplateSpec,
+			},
+			Template: &vmInstanceTemplateSpec,
+		},
+	}
+
+	return vmInstace
 }
 
 // SetupWithManager sets up the controller with the Manager.
