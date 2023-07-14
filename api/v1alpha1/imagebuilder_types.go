@@ -17,7 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -30,7 +29,7 @@ type ImageBuilderSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	//+optional
-	SubscriptionSecret *v1.LocalObjectReference `json:"subscriptionSecret,omitempty"`
+	SubscriptionSecretName string `json:"subscriptionSecret,omitempty"`
 }
 
 // ImageBuilderStatus defines the observed state of ImageBuilder

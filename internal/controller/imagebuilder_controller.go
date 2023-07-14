@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	//"encoding/base64"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -25,8 +27,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	osbuildv1alpha1 "github.com/kwozyman/osbuild-operator/api/v1alpha1"
-	//v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 )
+
+const defaultSubscriptionSecretName = "osbuild-subscription-secret"
 
 // ImageBuilderReconciler reconciles a ImageBuilder object
 type ImageBuilderReconciler struct {
@@ -57,9 +61,24 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if imageBuilder.Spec.SubscriptionSecret == nil {
-		logger.Info("spec.subscriptionSecret is not set, using osbuild-subscription-secret")
+	var subscriptionSecretName string //this is where we get the RH sub secret
+	if imageBuilder.Spec.SubscriptionSecretName == "" {
+		logger.Info("spec.subscriptionSecret is not set, using default")
+		subscriptionSecretName = defaultSubscriptionSecretName
+	} else {
+		subscriptionSecretName = imageBuilder.Spec.SubscriptionSecretName
+	}
+	logger.Info(subscriptionSecretName)
 
+	subscriptionSecret := &corev1.Secret{}
+
+	err := r.Get(ctx, client.ObjectKey{
+		Namespace: req.NamespacedName.Namespace,
+		Name:      subscriptionSecretName,
+	}, subscriptionSecret)
+	if err != nil {
+		logger.Error(err, "Could not find subscriptionSecret")
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
