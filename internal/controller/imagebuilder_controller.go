@@ -61,7 +61,6 @@ type ImageBuilderReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("hello operator")
 
 	var imageBuilder osbuildv1alpha1.ImageBuilder
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilder); err != nil {
@@ -71,12 +70,11 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	var subscriptionSecretName string //this is where we get the RH sub secret
 	if imageBuilder.Spec.SubscriptionSecretName == "" {
-		logger.Info("spec.subscriptionSecret is not set, using default")
+		logger.Info(fmt.Sprintf("spec.subscriptionSecret is not set, using default %s", defaultSubscriptionSecretName))
 		subscriptionSecretName = defaultSubscriptionSecretName
 	} else {
 		subscriptionSecretName = imageBuilder.Spec.SubscriptionSecretName
 	}
-	logger.Info(subscriptionSecretName)
 	subscriptionSecret := &corev1.Secret{}
 
 	err := r.Get(ctx, client.ObjectKey{
@@ -84,17 +82,15 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		Name:      subscriptionSecretName,
 	}, subscriptionSecret)
 	if err != nil {
-		logger.Error(err, "Could not find subscriptionSecret")
+		logger.Error(err, "Could not get subscriptionSecret")
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("Building VM object")
-	//logger.Info(fmt.Sprintf("%s", cloudInitData(*subscriptionSecret)))
-	vm := r.createVM(ctx, cloudInitData(*subscriptionSecret), imageBuilder.Name, imageBuilder.Namespace)
+	vm := r.createVM(cloudInitData(*subscriptionSecret), imageBuilder.Name, imageBuilder.Namespace)
 	logger.Info("Creating VM object")
-
 	if err := r.Create(ctx, &vm); err != nil {
-		logger.Error(err, "Could not create VM")
+		logger.Error(err, "Could not create Image Builder VM")
 		return ctrl.Result{}, err
 	}
 
@@ -150,10 +146,8 @@ runcmd:
 	return strings.ReplaceAll(renderedTemplate.String(), "\t", "    ")
 }
 
-func (r *ImageBuilderReconciler) createVM(ctx context.Context, cloudInitData string, name string, namespace string) kubevirt.VirtualMachine {
-	logger := log.FromContext(ctx)
+func (r *ImageBuilderReconciler) createVM(cloudInitData string, name string, namespace string) kubevirt.VirtualMachine {
 	rootVolumeName := fmt.Sprintf("%s-vm-volume", name)
-	logger.Info("built rootVolumeName")
 
 	dataVolumeTemplateSpec := kubevirt.DataVolumeTemplateSpec{}
 	dataVolumeTemplateSpec.Kind = "DataVolume"
