@@ -33,7 +33,9 @@ import (
 
 	osbuildv1alpha1 "github.com/kwozyman/osbuild-operator/api/v1alpha1"
 	"github.com/kwozyman/osbuild-operator/internal/controller"
+
 	//+kubebuilder:scaffold:imports
+	kubevirt "kubevirt.io/api/core/v1"
 )
 
 var (
@@ -46,6 +48,7 @@ func init() {
 
 	utilruntime.Must(osbuildv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
+	utilruntime.Must(kubevirt.AddToScheme(scheme))
 }
 
 func main() {

@@ -17,14 +17,18 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	"text/template"
 
 	osbuildv1alpha1 "github.com/kwozyman/osbuild-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -85,7 +89,8 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	logger.Info("Building VM object")
-	vm := r.createVM(ctx, subscriptionSecretName, imageBuilder.Name, imageBuilder.Namespace)
+	//logger.Info(fmt.Sprintf("%s", cloudInitData(*subscriptionSecret)))
+	vm := r.createVM(ctx, cloudInitData(*subscriptionSecret), imageBuilder.Name, imageBuilder.Namespace)
 	logger.Info("Creating VM object")
 
 	if err := r.Create(ctx, &vm); err != nil {
@@ -96,7 +101,56 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (r *ImageBuilderReconciler) createVM(ctx context.Context, subSecret string, name string, namespace string) kubevirt.VirtualMachine {
+func cloudInitData(subSecret corev1.Secret) string {
+	type rhSub struct {
+		Username string
+		Password string
+	}
+	secret := rhSub{
+		Username: string(subSecret.Data["username"]),
+		Password: string(subSecret.Data["password"]),
+	}
+	const configTemplate = `#cloud-config
+user: cloud-user
+password: redhat
+chpasswd: { expire: False }
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMPkccS+SKCZEWGJzH7ew0eNPItvqeGFpOhZprmL9owO fortress_of_solitude
+rh_subscription:
+  username: {{.Username}}
+  password: {{.Password}}
+write_files:
+  - path: /etc/systemd/system/osbuild-proxy.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=OSBuild tcp to socket bridge
+      After=osbuild-composer.socket
+      Requires=osbuild-composer.socket
+      [Service]
+      Type=simple
+      StandardOutput=syslog
+      StandardError=syslog
+      SyslogIdentifier=osbuild-proxy
+      ExecStart=socat -d -d TCP-LISTEN:8080,fork UNIX-CONNECT:/run/weldr/api.socket
+      Restart=always
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - [dnf, install, -y, osbuild-composer, composer-cli, socat]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, osbuild-composer.socket, osbuild-proxy]
+	`
+	config, err := template.New("cloudConfig").Parse(configTemplate)
+	if err != nil {
+		panic(err)
+	}
+	var renderedTemplate bytes.Buffer
+	config.Execute(&renderedTemplate, secret)
+	return strings.ReplaceAll(renderedTemplate.String(), "\t", "    ")
+}
+
+func (r *ImageBuilderReconciler) createVM(ctx context.Context, cloudInitData string, name string, namespace string) kubevirt.VirtualMachine {
 	logger := log.FromContext(ctx)
 	rootVolumeName := fmt.Sprintf("%s-vm-volume", name)
 	logger.Info("built rootVolumeName")
@@ -111,11 +165,6 @@ func (r *ImageBuilderReconciler) createVM(ctx context.Context, subSecret string,
 	dataVolumeTemplateSpecNamespace := "openshift-virtualization-os-images"
 	dataVolumeTemplateSpec.Spec.SourceRef.Namespace = &dataVolumeTemplateSpecNamespace
 
-	/*dataVolumeTemplateSpec.Spec.Storage.Resources = corev1.ResourceRequirements{
-		Requests: map[corev1.ResourceName]resource.Quantity{
-			corev1.ResourceStorage: resource.MustParse("30Gi"),
-		},
-	}*/
 	dataVolumeTemplateSpec.Spec.Storage = &v1beta1.StorageSpec{
 		Resources: corev1.ResourceRequirements{
 			Requests: map[corev1.ResourceName]resource.Quantity{
@@ -148,6 +197,11 @@ func (r *ImageBuilderReconciler) createVM(ctx context.Context, subSecret string,
 	vmInstanceTemplateSpec.Spec.Domain.Firmware = &kubevirt.Firmware{
 		Bootloader: &kubevirt.Bootloader{
 			EFI: &kubevirt.EFI{},
+		},
+	}
+	vmInstanceTemplateSpec.Spec.Domain.Features = &kubevirt.Features{
+		SMM: &kubevirt.FeatureState{
+			Enabled: pointer.Bool(true),
 		},
 	}
 
@@ -186,6 +240,9 @@ func (r *ImageBuilderReconciler) createVM(ctx context.Context, subSecret string,
 	vmInstanceTemplateSpec.Spec.Networks = []kubevirt.Network{
 		{
 			Name: "default",
+			NetworkSource: kubevirt.NetworkSource{
+				Pod: &kubevirt.PodNetwork{},
+			},
 		},
 	}
 
@@ -198,14 +255,14 @@ func (r *ImageBuilderReconciler) createVM(ctx context.Context, subSecret string,
 				},
 			},
 		},
-		// {
-		// 	Name: "cloudinitdisk",
-		// 	VolumeSource: kubevirt.VolumeSource{
-		// 		CloudInitNoCloud: &kubevirt.CloudInitNoCloudSource{
-		// 			UserData: cloudInitData,
-		// 		},
-		// 	},
-		// },
+		{
+			Name: "cloudinitdisk",
+			VolumeSource: kubevirt.VolumeSource{
+				CloudInitNoCloud: &kubevirt.CloudInitNoCloudSource{
+					UserData: cloudInitData,
+				},
+			},
+		},
 	}
 
 	vmInstace := kubevirt.VirtualMachine{
@@ -222,6 +279,7 @@ func (r *ImageBuilderReconciler) createVM(ctx context.Context, subSecret string,
 				dataVolumeTemplateSpec,
 			},
 			Template: &vmInstanceTemplateSpec,
+			Running:  pointer.Bool(true),
 		},
 	}
 
