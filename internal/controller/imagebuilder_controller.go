@@ -39,6 +39,7 @@ import (
 )
 
 const defaultSubscriptionSecretName = "osbuild-subscription-secret"
+const defaultImageBuilderPort int32 = 8080
 
 // ImageBuilderReconciler reconciles a ImageBuilder object
 type ImageBuilderReconciler struct {
@@ -68,6 +69,14 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	var servicePort int32
+	if imageBuilder.Spec.ServicePort == 0 {
+		logger.Info(fmt.Sprintf("spec.servicePort is not set, using default %v", defaultImageBuilderPort))
+		servicePort = defaultImageBuilderPort
+	} else {
+		servicePort = imageBuilder.Spec.ServicePort
+	}
+
 	var subscriptionSecretName string //this is where we get the RH sub secret
 	if imageBuilder.Spec.SubscriptionSecretName == "" {
 		logger.Info(fmt.Sprintf("spec.subscriptionSecret is not set, using default %s", defaultSubscriptionSecretName))
@@ -94,7 +103,36 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	service := r.createVMService(servicePort, imageBuilder.Name, imageBuilder.Namespace)
+	logger.Info("Creating service object")
+	if err := r.Create(ctx, &service); err != nil {
+		logger.Error(err, "Could not create Image Builder Service")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *ImageBuilderReconciler) createVMService(port int32, name string, namespace string) corev1.Service {
+	service := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Protocol: "TCP",
+					Port:     int32(port),
+				},
+			},
+			Selector: map[string]string{
+				"vm.kubevirt.io/name": name,
+			},
+		},
+	}
+
+	return service
 }
 
 func cloudInitData(subSecret corev1.Secret) string {
