@@ -96,7 +96,8 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	logger.Info("Building VM object")
-	vm := r.createVM(cloudInitData(*subscriptionSecret), imageBuilder.Name, imageBuilder.Namespace)
+	logger.Info(cloudInitData(*subscriptionSecret, imageBuilder.Spec.SshKey))
+	vm := r.createVM(cloudInitData(*subscriptionSecret, imageBuilder.Spec.SshKey), imageBuilder.Name, imageBuilder.Namespace)
 	logger.Info("Creating VM object")
 	if err := r.Create(ctx, &vm); err != nil {
 		logger.Error(err, "Could not create Image Builder VM")
@@ -135,22 +136,24 @@ func (r *ImageBuilderReconciler) createVMService(port int32, name string, namesp
 	return service
 }
 
-func cloudInitData(subSecret corev1.Secret) string {
-	type rhSub struct {
+func cloudInitData(subSecret corev1.Secret, key string) string {
+	type templateValues struct {
 		Username string
 		Password string
+		SshKey   string
 	}
-	secret := rhSub{
+	values := templateValues{
 		Username: string(subSecret.Data["username"]),
 		Password: string(subSecret.Data["password"]),
+		SshKey:   key,
 	}
 	const configTemplate = `#cloud-config
 user: cloud-user
 password: redhat
 chpasswd: { expire: False }
-ssh_authorized_keys:
-  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMPkccS+SKCZEWGJzH7ew0eNPItvqeGFpOhZprmL9owO fortress_of_solitude
-rh_subscription:
+{{if ne .SshKey ""}}ssh_authorized_keys:
+  - {{.SshKey}}
+{{end}}rh_subscription:
   username: {{.Username}}
   password: {{.Password}}
 write_files:
@@ -180,7 +183,7 @@ runcmd:
 		panic(err)
 	}
 	var renderedTemplate bytes.Buffer
-	config.Execute(&renderedTemplate, secret)
+	config.Execute(&renderedTemplate, values)
 	return strings.ReplaceAll(renderedTemplate.String(), "\t", "    ")
 }
 

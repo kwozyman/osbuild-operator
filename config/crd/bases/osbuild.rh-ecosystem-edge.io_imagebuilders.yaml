@@ -37,6 +37,8 @@ spec:
               servicePort:
                 format: int32
                 type: integer
+              sshKey:
+                type: string
               subscriptionSecret:
                 type: string
             type: object

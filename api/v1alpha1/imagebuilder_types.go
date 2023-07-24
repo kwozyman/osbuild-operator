@@ -31,6 +31,7 @@ type ImageBuilderSpec struct {
 	//+optional
 	SubscriptionSecretName string `json:"subscriptionSecret,omitempty"`
 	ServicePort            int32  `json:"servicePort,omitempty"`
+	SshKey                 string `json:"sshKey,omitempty"`
 }
 
 // ImageBuilderStatus defines the observed state of ImageBuilder
