@@ -64,7 +64,7 @@ const waitScriptTemplate = `#!/bin/bash
 compose_id=$(jq '.build_id' -r /workspace/shared-volume/compose.json)
 while /usr/bin/curl "${api}/compose/queue" --silent | jq -r '.run[].id' | grep ${compose_id}; do sleep 30; done
 /usr/bin/curl "${api}/compose/failed" --silent | jq -r '.failed[].id' | grep "${compose_id}" && echo "Compose ${compose_id} failed!" && exit 1
-/usr/bin/curl "${api}/compose/finished" --silent | jq -r --arg id "${composer_id}" '.finished[] | select (.id==$id)'"
+/usr/bin/curl "${api}/compose/finished" --silent | jq -r --arg id "${composer_id}" '.finished[] | select (.id==$id)'
 `
 
 // ImageBuilderImageReconciler reconciles a ImageBuilderImage object
