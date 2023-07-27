@@ -1,0 +1,65 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.12.0
+  name: imagebuilderimages.osbuild.rh-ecosystem-edge.io
+spec:
+  group: osbuild.rh-ecosystem-edge.io
+  names:
+    kind: ImageBuilderImage
+    listKind: ImageBuilderImageList
+    plural: imagebuilderimages
+    singular: imagebuilderimage
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ImageBuilderImage is the Schema for the imagebuilderimages API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ImageBuilderImageSpec defines the desired state of ImageBuilderImage
+            properties:
+              blueprintIsoTemplate:
+                type: string
+              blueprintTemplate:
+                type: string
+              fdoManufacturingServerUrl:
+                type: string
+              imageBuilder:
+                type: string
+              installationDevice:
+                type: string
+              name:
+                description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+                  Important: Run "make" to regenerate code after modifying this file'
+                type: string
+              persistentVolumeName:
+                type: string
+              sshKey:
+                type: string
+              userName:
+                type: string
+            type: object
+          status:
+            description: ImageBuilderImageStatus defines the observed state of ImageBuilderImage
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

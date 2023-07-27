@@ -35,6 +35,7 @@ import (
 	"github.com/kwozyman/osbuild-operator/internal/controller"
 
 	//+kubebuilder:scaffold:imports
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	kubevirt "kubevirt.io/api/core/v1"
 )
 
@@ -49,6 +50,7 @@ func init() {
 	utilruntime.Must(osbuildv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 	utilruntime.Must(kubevirt.AddToScheme(scheme))
+	utilruntime.Must(tektonv1.AddToScheme(scheme))
 }
 
 func main() {
@@ -97,6 +99,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ImageBuilder")
+		os.Exit(1)
+	}
+	if err = (&controller.ImageBuilderImageReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ImageBuilderImage")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

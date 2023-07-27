@@ -7,6 +7,32 @@ rules:
 - apiGroups:
   - osbuild.rh-ecosystem-edge.io
   resources:
+  - imagebuilderimages
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - osbuild.rh-ecosystem-edge.io
+  resources:
+  - imagebuilderimages/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - osbuild.rh-ecosystem-edge.io
+  resources:
+  - imagebuilderimages/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - osbuild.rh-ecosystem-edge.io
+  resources:
   - imagebuilders
   verbs:
   - create

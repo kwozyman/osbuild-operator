@@ -1,0 +1,12 @@
+apiVersion: osbuild.rh-ecosystem-edge.io/v1alpha1
+kind: ImageBuilderImage
+metadata:
+  labels:
+    app.kubernetes.io/name: imagebuilderimage
+    app.kubernetes.io/instance: imagebuilderimage-sample
+    app.kubernetes.io/part-of: osbuild-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: osbuild-operator
+  name: imagebuilderimage-sample
+spec:
+  # TODO(user): Add fields here
