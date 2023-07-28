@@ -358,6 +358,14 @@ func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav
 						"/usr/bin/curl $(params.apiEndpoint)/compose/image/$(/usr/bin/jq -r '.build_id' /workspace/shared-volume/$(params.blueprintName)/compose.json) --output /workspace/shared-volume/$(params.blueprintName)/edge-commit.tar --verbose",
 					},
 				},
+				{
+					Name:  "extract-commit",
+					Image: ubiImage,
+					Command: []string{
+						"/usr/bin/bash", "-c",
+						"tar xf /workspace/shared-volume/$(params.blueprintName)/edge-commit.tar -C /workspace/shared-volume/$(params.blueprintName)/",
+					},
+				},
 			},
 		},
 	}
