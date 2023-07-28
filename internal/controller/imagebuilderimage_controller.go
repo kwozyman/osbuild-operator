@@ -167,7 +167,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// store blueprints in configmaps
 	blueprintConfigMap := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      imageSpec.Name,
+			Name:      fmt.Sprintf("%s-blueprint", imageSpec.Name),
 			Namespace: imageBuilderImage.Namespace,
 		},
 		Data: map[string]string{
@@ -176,7 +176,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 	blueprintIsoConfigMap := corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-iso", imageSpec.Name),
+			Name:      fmt.Sprintf("%s-iso-blueprint", imageSpec.Name),
 			Namespace: imageBuilderImage.Namespace,
 		},
 		Data: map[string]string{
