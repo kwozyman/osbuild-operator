@@ -37,6 +37,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const ubiImage = "registry.access.redhat.com/ubi9:latest"
+const utilsImage = "quay.io/cgament/composer-cli"
 const defaultBlueprintTemplate = `name = "{{ .Name }}"
 version = "0.0.1"
 modules = []
@@ -62,8 +64,8 @@ diun_pub_key_insecure = "true"
 `
 
 const waitScriptTemplate = `#!/bin/bash
-compose_id=$(jq '.build_id' -r /workspace/shared-volume/compose.json)
-while /usr/bin/curl "${api}/compose/queue" --silent | jq -r '.run[].id' | grep ${compose_id}; do sleep 30; done
+compose_id=$(jq '.build_id' -r /workspace/shared-volume/$(params.blueprintName)/compose.json)
+while /usr/bin/curl "${api}/compose/queue" --silent | jq -r '.run[].id' | grep ${compose_id} || usr/bin/curl "${api}/compose/queue" --silent | jq -r '.new[].id' | grep ${compose_id}; do sleep 30; done
 /usr/bin/curl "${api}/compose/failed" --silent | jq -r '.failed[].id' | grep "${compose_id}" && echo "Compose ${compose_id} failed!" && exit 1
 /usr/bin/curl "${api}/compose/finished" --silent | jq -r --arg id "${composer_id}" '.finished[] | select (.id==$id)'
 `
@@ -219,10 +221,24 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// generate and create pipeline tasks
 	apiUrl := fmt.Sprintf("http://%s.%s:%v/api/v1",
 		imageService.Name, imageService.Namespace, imageService.Spec.Ports[0].Port)
+
+	prepareTask := r.PrepareSharedVolumeTask(metav1.ObjectMeta{
+		Name:      "prepare-volume",
+		Namespace: req.Namespace,
+	})
+	if err := r.Create(ctx, &prepareTask); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("prepare volume task already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create task preparevolume")
+			return ctrl.Result{}, err
+		}
+	}
+
 	commitTask := r.CommitTask(metav1.ObjectMeta{
 		Name:      "generate-commit",
 		Namespace: req.Namespace,
-	}, apiUrl, imageSpec.Name)
+	})
 	if err := r.Create(ctx, &commitTask); err != nil {
 		if errors.IsAlreadyExists(err) {
 			logger.Info("Commit task already exists, skipping creation")
@@ -231,12 +247,24 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			return ctrl.Result{}, err
 		}
 	}
+	downloadTask := r.DownloadExtractCommitTask(metav1.ObjectMeta{
+		Name:      "download-extract-commit",
+		Namespace: req.Namespace,
+	}, apiUrl)
+	if err := r.Create(ctx, &downloadTask); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Download and extract task already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create download task")
+			return ctrl.Result{}, err
+		}
+	}
 
 	// create commit pipeline and pipelinerun
 	imagePipeline := r.ImagePipeline(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-pipeline", req.Name),
 		Namespace: req.Namespace,
-	}, []tektonv1.Task{commitTask}, logger)
+	}, []tektonv1.Task{prepareTask, commitTask, downloadTask}, logger)
 	if err := r.Create(ctx, &imagePipeline); err != nil {
 		if errors.IsAlreadyExists(err) {
 			logger.Info("Image generation pipeline already exists, skipping creation")
@@ -270,6 +298,22 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 					},
 				},
 			},
+			Params: tektonv1.Params{
+				{
+					Name: "blueprintName",
+					Value: tektonv1.ParamValue{
+						Type:      "string",
+						StringVal: req.Name,
+					},
+				},
+				{
+					Name: "apiEndpoint",
+					Value: tektonv1.ParamValue{
+						Type:      "string",
+						StringVal: apiUrl,
+					},
+				},
+			},
 		},
 	}
 
@@ -285,7 +329,85 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, nil
 }
 
-func (r *ImageBuilderImageReconciler) CommitTask(objectMeta metav1.ObjectMeta, apiEndpoint string, blueprintName string) tektonv1.Task {
+func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav1.ObjectMeta, apiEndpoint string) tektonv1.Task {
+	task := tektonv1.Task{
+		ObjectMeta: objectMeta,
+		Spec: tektonv1.TaskSpec{
+			Workspaces: []tektonv1.WorkspaceDeclaration{
+				{
+					Name: "shared-volume",
+				},
+				{
+					Name: "blueprints",
+				},
+			},
+			Params: tektonv1.ParamSpecs{
+				tektonv1.ParamSpec{
+					Name: "blueprintName",
+				},
+				{
+					Name: "apiEndpoint",
+				},
+			},
+			Steps: []tektonv1.Step{
+				{
+					Name:  "download-commit",
+					Image: utilsImage,
+					Command: []string{
+						"/usr/bin/bash", "-c",
+						"/usr/bin/curl $(params.apiEndpoint)/image/compose/$(/usr/bin/jq -r '.build_id' /workspace/shared-volume/$(params.blueprintName)/compose.json) --output /workspace/shared-volume/$(params.blueprintName)/edge-commit.tar",
+					},
+				},
+			},
+		},
+	}
+	return task
+}
+
+func (r *ImageBuilderImageReconciler) PrepareSharedVolumeTask(objectMeta metav1.ObjectMeta) tektonv1.Task {
+	task := tektonv1.Task{
+		ObjectMeta: objectMeta,
+		Spec: tektonv1.TaskSpec{
+			Workspaces: []tektonv1.WorkspaceDeclaration{
+				{
+					Name: "shared-volume",
+				},
+				{
+					Name: "blueprints",
+				},
+			},
+			Params: tektonv1.ParamSpecs{
+				{
+					Name: "blueprintName",
+				},
+				{
+					Name: "apiEndpoint",
+				},
+			},
+			Steps: []tektonv1.Step{
+				{
+					Name:  "create-directory",
+					Image: ubiImage,
+					Command: []string{
+						"/bin/bash", "-c",
+						"mkdir -p \"/workspace/shared-volume/$(params.blueprintName)\" && echo Using blueprint $(params.blueprintName)",
+					},
+				},
+				{
+					Name:  "remove-compose-file",
+					Image: ubiImage,
+					Command: []string{
+						"/bin/bash", "-c",
+						"rm -fv \"workspace/shared-volume/$(params.blueprintName)\"/compose.json",
+					},
+				},
+			},
+		},
+	}
+	return task
+}
+
+func (r *ImageBuilderImageReconciler) CommitTask(objectMeta metav1.ObjectMeta) tektonv1.Task {
 	task := tektonv1.Task{
 		ObjectMeta: objectMeta,
 		Spec: tektonv1.TaskSpec{
@@ -297,41 +419,42 @@ func (r *ImageBuilderImageReconciler) CommitTask(objectMeta metav1.ObjectMeta, a
 					Name: "shared-volume",
 				},
 			},
+			Params: tektonv1.ParamSpecs{
+				{
+					Name: "blueprintName",
+				},
+				{
+					Name: "apiEndpoint",
+				},
+			},
 			Steps: []tektonv1.Step{
 				{
 					Name:  "push-blueprint",
-					Image: "registry.access.redhat.com/ubi9:latest",
+					Image: ubiImage,
 					Command: []string{
-						"/usr/bin/curl", "-H", "Content-Type: text/x-toml", "--data-binary", fmt.Sprintf("@/workspace/blueprints/%s", blueprintName), fmt.Sprintf("%s/blueprints/new", apiEndpoint),
+						"/usr/bin/curl", "-H", "Content-Type: text/x-toml", "--data-binary", "@/workspace/blueprints/$(params.blueprintName)", "$(params.apiEndpoint)/blueprints/new",
 						"--silent",
 					},
 				},
 				{
-					Name:  "clear-compose-file",
-					Image: "registry.access.redhat.com/ubi9:latest",
-					Command: []string{
-						"/usr/bin/rm", "-f", "/workspace/shared-volume/compose.json",
-					},
-				},
-				{
 					Name:  "start-compose",
-					Image: "registry.access.redhat.com/ubi9:latest",
+					Image: ubiImage,
 					Command: []string{
 						"/usr/bin/curl", "-H", "Content-Type: application/json",
-						"--data", fmt.Sprintf("{\"blueprint_name\":\"%s\",\"compose_type\":\"edge-commit\"}", blueprintName),
-						fmt.Sprintf("%s/compose", apiEndpoint),
-						"--output", "/workspace/shared-volume/compose.json",
+						"--data", "{\"blueprint_name\":\"$(params.blueprintName)\",\"compose_type\":\"edge-commit\"}",
+						"$(params.apiEndpoint)/compose",
+						"--output", "/workspace/shared-volume/$(params.blueprintName)/compose.json",
 						"--silent",
 					},
 				},
 				{
 					Name:   "wait-for-finish",
-					Image:  "quay.io/cgament/composer-cli",
+					Image:  utilsImage,
 					Script: waitScriptTemplate,
 					Env: []corev1.EnvVar{
 						{
 							Name:  "api",
-							Value: apiEndpoint,
+							Value: "$(params.apiEndpoint)",
 						},
 					},
 				},
@@ -343,9 +466,9 @@ func (r *ImageBuilderImageReconciler) CommitTask(objectMeta metav1.ObjectMeta, a
 
 func (r *ImageBuilderImageReconciler) ImagePipeline(objectMeta metav1.ObjectMeta, tasks []tektonv1.Task, logger logr.Logger) tektonv1.Pipeline {
 	pipelinetasks := []tektonv1.PipelineTask{}
-	for _, task := range tasks {
-		logger.Info(task.Name)
-		pipelinetasks = append(pipelinetasks, tektonv1.PipelineTask{
+	previousTask := tektonv1.Task{}
+	for counter, task := range tasks {
+		currentTask := tektonv1.PipelineTask{
 			TaskRef: &tektonv1.TaskRef{
 				Name: task.Name,
 			},
@@ -358,7 +481,30 @@ func (r *ImageBuilderImageReconciler) ImagePipeline(objectMeta metav1.ObjectMeta
 					Name: "shared-volume",
 				},
 			},
-		})
+			Params: tektonv1.Params{
+				tektonv1.Param{
+					Name: "blueprintName",
+					Value: tektonv1.ParamValue{
+						Type:      "string",
+						StringVal: "$(params.blueprintName)",
+					},
+				},
+				{
+					Name: "apiEndpoint",
+					Value: tektonv1.ParamValue{
+						Type:      "string",
+						StringVal: "$(params.apiEndpoint)",
+					},
+				},
+			},
+		}
+		if counter == 0 {
+			previousTask = task
+		} else {
+			currentTask.RunAfter = []string{previousTask.Name}
+			previousTask = task
+		}
+		pipelinetasks = append(pipelinetasks, currentTask)
 	}
 	pipeline := tektonv1.Pipeline{
 		ObjectMeta: objectMeta,
@@ -372,6 +518,14 @@ func (r *ImageBuilderImageReconciler) ImagePipeline(objectMeta metav1.ObjectMeta
 				},
 			},
 			Tasks: pipelinetasks,
+			Params: tektonv1.ParamSpecs{
+				{
+					Name: "blueprintName",
+				},
+				{
+					Name: "apiEndpoint",
+				},
+			},
 		},
 	}
 	return pipeline
