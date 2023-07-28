@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -92,6 +93,10 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// get new ImageBuilderImage object
 	var imageBuilderImage osbuildv1alpha1.ImageBuilderImage
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilderImage); err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("Resource not found, must have been deleted")
+			return ctrl.Result{}, nil
+		}
 		logger.Error(err, "Unable to fetch ImageBuilderImage")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -177,12 +182,20 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		},
 	}
 	if err := r.Create(ctx, &blueprintConfigMap); err != nil {
-		logger.Error(err, "Could not create main blueprint")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Main blueprint configmap already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create main blueprint")
+			return ctrl.Result{}, err
+		}
 	}
 	if err := r.Create(ctx, &blueprintIsoConfigMap); err != nil {
-		logger.Error(err, "Could not create iso blueprint")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Iso blueprint configmap already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create iso blueprint")
+			return ctrl.Result{}, err
+		}
 	}
 
 	//persistentVolume used for inter-task communication
@@ -211,8 +224,12 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		Namespace: req.Namespace,
 	}, apiUrl, imageSpec.Name)
 	if err := r.Create(ctx, &commitTask); err != nil {
-		logger.Error(err, "Could not create commit task")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Commit task already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create commit task")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// create commit pipeline and pipelinerun
@@ -221,8 +238,12 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		Namespace: req.Namespace,
 	}, []tektonv1.Task{commitTask}, logger)
 	if err := r.Create(ctx, &imagePipeline); err != nil {
-		logger.Error(err, "Could not create image pipeline")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Image generation pipeline already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create image pipeline")
+			return ctrl.Result{}, err
+		}
 	}
 	imagePipelineRun := tektonv1.PipelineRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -253,8 +274,12 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	if err := r.Create(ctx, &imagePipelineRun); err != nil {
-		logger.Error(err, "Could not create commit pipelinerun")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Image generation pipeline run already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create commit pipelinerun")
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil

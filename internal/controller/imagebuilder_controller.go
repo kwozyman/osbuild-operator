@@ -19,9 +19,11 @@ package controller
 import (
 	"bytes"
 	"context"
+
 	"fmt"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -65,6 +67,10 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	var imageBuilder osbuildv1alpha1.ImageBuilder
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilder); err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("Resource not found, must have been deleted")
+			return ctrl.Result{}, nil
+		}
 		logger.Error(err, "Unable to fetch ImageBuilder")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -100,15 +106,23 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	vm := r.createVM(cloudInitData(*subscriptionSecret, imageBuilder.Spec.SshKey), imageBuilder.Name, imageBuilder.Namespace)
 	logger.Info("Creating VM object")
 	if err := r.Create(ctx, &vm); err != nil {
-		logger.Error(err, "Could not create Image Builder VM")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Image Builder VM already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create Image Builder VM")
+			return ctrl.Result{}, err
+		}
 	}
 
 	service := r.createVMService(servicePort, imageBuilder.Name, imageBuilder.Namespace)
 	logger.Info("Creating service object")
 	if err := r.Create(ctx, &service); err != nil {
-		logger.Error(err, "Could not create Image Builder Service")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Image Builder VM already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create Image Builder Service")
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
