@@ -73,7 +73,9 @@ while /usr/bin/curl "${api}/compose/queue" --silent | jq -r '.run[].id' | grep $
 // ImageBuilderImageReconciler reconciles a ImageBuilderImage object
 type ImageBuilderImageReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme             *runtime.Scheme
+	PipelineWorkspaces []tektonv1.WorkspaceDeclaration
+	PipelineParams     tektonv1.ParamSpecs
 }
 
 //+kubebuilder:rbac:groups=osbuild.rh-ecosystem-edge.io,resources=imagebuilderimages,verbs=get;list;watch;create;update;patch;delete
@@ -208,15 +210,24 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	} else {
 		pvcName = imageBuilderImage.Spec.SharedVolume
 	}
-	/*
-		sharedVolume := corev1.PersistentVolumeClaim{}
-		if err := r.Get(ctx, client.ObjectKey{
-			Name: pvcName,
-		}, &sharedVolume); err != nil {
-			logger.Info("Could not get PVC. Creating")
-			//TODO: create volume
-			}
-	*/
+
+	// common pipeline environment
+	r.PipelineWorkspaces = []tektonv1.WorkspaceDeclaration{
+		{
+			Name: "shared-volume",
+		},
+		{
+			Name: "blueprints",
+		},
+	}
+	r.PipelineParams = tektonv1.ParamSpecs{
+		tektonv1.ParamSpec{
+			Name: "blueprintName",
+		},
+		{
+			Name: "apiEndpoint",
+		},
+	}
 
 	// generate and create pipeline tasks
 	apiUrl := fmt.Sprintf("http://%s.%s:%v/api/v1",
@@ -333,22 +344,8 @@ func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav
 	task := tektonv1.Task{
 		ObjectMeta: objectMeta,
 		Spec: tektonv1.TaskSpec{
-			Workspaces: []tektonv1.WorkspaceDeclaration{
-				{
-					Name: "shared-volume",
-				},
-				{
-					Name: "blueprints",
-				},
-			},
-			Params: tektonv1.ParamSpecs{
-				tektonv1.ParamSpec{
-					Name: "blueprintName",
-				},
-				{
-					Name: "apiEndpoint",
-				},
-			},
+			Workspaces: r.PipelineWorkspaces,
+			Params:     r.PipelineParams,
 			Steps: []tektonv1.Step{
 				{
 					Name:  "download-commit",
@@ -376,22 +373,8 @@ func (r *ImageBuilderImageReconciler) PrepareSharedVolumeTask(objectMeta metav1.
 	task := tektonv1.Task{
 		ObjectMeta: objectMeta,
 		Spec: tektonv1.TaskSpec{
-			Workspaces: []tektonv1.WorkspaceDeclaration{
-				{
-					Name: "shared-volume",
-				},
-				{
-					Name: "blueprints",
-				},
-			},
-			Params: tektonv1.ParamSpecs{
-				{
-					Name: "blueprintName",
-				},
-				{
-					Name: "apiEndpoint",
-				},
-			},
+			Workspaces: r.PipelineWorkspaces,
+			Params:     r.PipelineParams,
 			Steps: []tektonv1.Step{
 				{
 					Name:  "create-directory",
@@ -419,22 +402,8 @@ func (r *ImageBuilderImageReconciler) CommitTask(objectMeta metav1.ObjectMeta) t
 	task := tektonv1.Task{
 		ObjectMeta: objectMeta,
 		Spec: tektonv1.TaskSpec{
-			Workspaces: []tektonv1.WorkspaceDeclaration{
-				{
-					Name: "blueprints",
-				},
-				{
-					Name: "shared-volume",
-				},
-			},
-			Params: tektonv1.ParamSpecs{
-				{
-					Name: "blueprintName",
-				},
-				{
-					Name: "apiEndpoint",
-				},
-			},
+			Workspaces: r.PipelineWorkspaces,
+			Params:     r.PipelineParams,
 			Steps: []tektonv1.Step{
 				{
 					Name:  "push-blueprint",
@@ -525,15 +494,8 @@ func (r *ImageBuilderImageReconciler) ImagePipeline(objectMeta metav1.ObjectMeta
 					Name: "shared-volume",
 				},
 			},
-			Tasks: pipelinetasks,
-			Params: tektonv1.ParamSpecs{
-				{
-					Name: "blueprintName",
-				},
-				{
-					Name: "apiEndpoint",
-				},
-			},
+			Tasks:  pipelinetasks,
+			Params: r.PipelineParams,
 		},
 	}
 	return pipeline
