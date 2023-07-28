@@ -355,7 +355,7 @@ func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav
 					Image: utilsImage,
 					Command: []string{
 						"/usr/bin/bash", "-c",
-						"/usr/bin/curl $(params.apiEndpoint)/image/compose/$(/usr/bin/jq -r '.build_id' /workspace/shared-volume/$(params.blueprintName)/compose.json) --output /workspace/shared-volume/$(params.blueprintName)/edge-commit.tar",
+						"/usr/bin/curl $(params.apiEndpoint)/compose/image/$(/usr/bin/jq -r '.build_id' /workspace/shared-volume/$(params.blueprintName)/compose.json) --output /workspace/shared-volume/$(params.blueprintName)/edge-commit.tar --verbose",
 					},
 				},
 			},
