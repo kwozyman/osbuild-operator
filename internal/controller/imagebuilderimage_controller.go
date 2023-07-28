@@ -223,7 +223,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		imageService.Name, imageService.Namespace, imageService.Spec.Ports[0].Port)
 
 	prepareTask := r.PrepareSharedVolumeTask(metav1.ObjectMeta{
-		Name:      "prepare-volume",
+		Name:      fmt.Sprintf("%s-prepare-volume", req.Name),
 		Namespace: req.Namespace,
 	})
 	if err := r.Create(ctx, &prepareTask); err != nil {
@@ -236,7 +236,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	commitTask := r.CommitTask(metav1.ObjectMeta{
-		Name:      "generate-commit",
+		Name:      fmt.Sprintf("%s-generate-commit", req.Name),
 		Namespace: req.Namespace,
 	})
 	if err := r.Create(ctx, &commitTask); err != nil {
@@ -248,7 +248,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 	downloadTask := r.DownloadExtractCommitTask(metav1.ObjectMeta{
-		Name:      "download-extract-commit",
+		Name:      fmt.Sprintf("%s-download-extract-commit", req.Name),
 		Namespace: req.Namespace,
 	}, apiUrl)
 	if err := r.Create(ctx, &downloadTask); err != nil {
