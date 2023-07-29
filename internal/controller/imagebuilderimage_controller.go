@@ -21,6 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -103,6 +104,18 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilderImage); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("Resource not found, must have been deleted")
+			if err := r.DeleteAllObjectsWithLabel(ctx, "PipelineRun", "tekton.dev/v1", "osbuild-operator", req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.DeleteAllObjectsWithLabel(ctx, "Pipeline", "tekton.dev/v1", "osbuild-operator", req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.DeleteAllObjectsWithLabel(ctx, "Task", "tekton.dev/v1", "osbuild-operator", req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.DeleteAllObjectsWithLabel(ctx, "ConfigMap", "v1", "osbuild-operator", req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Unable to fetch ImageBuilderImage")
@@ -379,6 +392,27 @@ func (r *ImageBuilderImageReconciler) CreateOrUpdateObject(ctx context.Context, 
 		}
 	}
 	logger.Info(fmt.Sprintf("Object %s/%s created", object.GetObjectKind(), object.GetName()))
+	return nil
+}
+
+func (r *ImageBuilderImageReconciler) DeleteAllObjectsWithLabel(ctx context.Context, kind string, apiVersion string, label string, imageName string) error {
+	logger := log.FromContext(ctx)
+	u := unstructured.UnstructuredList{}
+	u.SetKind(kind)
+	u.SetAPIVersion(apiVersion)
+	if err := r.List(ctx, &u); err != nil {
+		logger.Error(err, fmt.Sprintf("Could not list objects %s/%s", kind, apiVersion))
+		return err
+	}
+	for _, item := range u.Items {
+		if item.GetLabels()[label] == imageName {
+			if err := r.Delete(ctx, &item); err != nil {
+				logger.Error(err, fmt.Sprintf("Could not delete object %s/%s", kind, item.GetName()))
+				return err
+			}
+			logger.Info(fmt.Sprintf("Deleted object %s/%s", kind, item.GetName()))
+		}
+	}
 	return nil
 }
 
