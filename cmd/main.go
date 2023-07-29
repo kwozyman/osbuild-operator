@@ -35,6 +35,7 @@ import (
 	"github.com/kwozyman/osbuild-operator/internal/controller"
 
 	//+kubebuilder:scaffold:imports
+	routev1 "github.com/openshift/api/route/v1"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	kubevirt "kubevirt.io/api/core/v1"
 )
@@ -51,6 +52,7 @@ func init() {
 	//+kubebuilder:scaffold:scheme
 	utilruntime.Must(kubevirt.AddToScheme(scheme))
 	utilruntime.Must(tektonv1.AddToScheme(scheme))
+	utilruntime.Must(routev1.AddToScheme(scheme))
 }
 
 func main() {

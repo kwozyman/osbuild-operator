@@ -19,10 +19,14 @@ package controller
 import (
 	"context"
 
+	routev1 "github.com/openshift/api/route/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -114,6 +118,15 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 				return ctrl.Result{}, err
 			}
 			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "ConfigMap", "v1", imageBuilderImageLabel, req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Route", "route.openshift.io/v1", imageBuilderImageLabel, req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Service", "v1", imageBuilderImageLabel, req.Name); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Deployment", "apps/v1", imageBuilderImageLabel, req.Name); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
@@ -368,6 +381,48 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			logger.Info("Image generation pipeline run already exists, skipping creation")
 		} else {
 			logger.Error(err, "Could not create commit pipelinerun")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// webserver deployment
+	webDeployment := r.WebDeployment(metav1.ObjectMeta{
+		Name:      fmt.Sprintf("%s-web", req.Name),
+		Namespace: req.Namespace,
+		Labels:    labels,
+	}, pvcName, req.Name)
+	webService := r.WebService(metav1.ObjectMeta{
+		Name:      fmt.Sprintf("%s-service", req.Name),
+		Namespace: req.Namespace,
+		Labels:    labels,
+	}, webDeployment.Name)
+	webRoute := r.WebRoute(metav1.ObjectMeta{
+		Name:      fmt.Sprintf("%s-route", req.Name),
+		Namespace: req.Namespace,
+		Labels:    labels,
+	}, webService.Name)
+
+	if err := r.Create(ctx, &webDeployment); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Deployment already exists")
+		} else {
+			logger.Error(err, "Could not create deplyoment")
+			return ctrl.Result{}, err
+		}
+	}
+	if err := r.Create(ctx, &webService); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Service already exists")
+		} else {
+			logger.Error(err, "Service could not be created")
+			return ctrl.Result{}, err
+		}
+	}
+	if err := r.Create(ctx, &webRoute); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Route already exists")
+		} else {
+			logger.Error(err, "Could not create route")
 			return ctrl.Result{}, err
 		}
 	}
@@ -632,6 +687,107 @@ func (r *ImageBuilderImageReconciler) ImagePipeline(objectMeta metav1.ObjectMeta
 		},
 	}
 	return pipeline
+}
+
+func (r *ImageBuilderImageReconciler) WebRoute(objectMeta metav1.ObjectMeta, serviceName string) routev1.Route {
+	route := routev1.Route{
+		ObjectMeta: objectMeta,
+		Spec: routev1.RouteSpec{
+			To: routev1.RouteTargetReference{
+				Kind: "Service",
+				Name: serviceName,
+			},
+			Port: &routev1.RoutePort{
+				TargetPort: intstr.FromInt(8080),
+			},
+		},
+	}
+	return route
+}
+
+func (r *ImageBuilderImageReconciler) WebService(objectMeta metav1.ObjectMeta, appName string) corev1.Service {
+	service := corev1.Service{
+		ObjectMeta: objectMeta,
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Port:       8089,
+					TargetPort: intstr.FromInt(8080),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+			Selector: map[string]string{
+				"app": appName,
+			},
+			Type: corev1.ServiceTypeClusterIP,
+		},
+	}
+	return service
+}
+
+func (r *ImageBuilderImageReconciler) WebDeployment(objectMeta metav1.ObjectMeta, pvcName string, imageName string) appsv1.Deployment {
+	appName := objectMeta.Name
+	var replicas int32 = 1
+	webDeployment := appsv1.Deployment{
+		ObjectMeta: objectMeta,
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": appName,
+				},
+			},
+			Replicas: &replicas,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": appName,
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "nginx",
+							Image: "docker.io/nginxinc/nginx-unprivileged",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("500m"),
+									corev1.ResourceMemory: resource.MustParse("128Mi"),
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									ContainerPort: 8080,
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "data-pv",
+									MountPath: "/usr/share/nginx/html/ostree",
+									SubPath:   "repo",
+								},
+								{
+									Name:      "data-pv",
+									MountPath: "/usr/share/nginx/html/installer.iso",
+									SubPath:   fmt.Sprintf("%s/installer.iso", imageName),
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "data-pv",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: pvcName,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return webDeployment
 }
 
 func renderTemplateFromSpec(blueprint string, values osbuildv1alpha1.ImageBuilderImageSpec) string {
