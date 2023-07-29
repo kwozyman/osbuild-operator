@@ -199,7 +199,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		},
 	}
 
-	if err := r.CreateOrUpdateObject(ctx, &blueprintConfigMap); err != nil {
+	if err := CreateOrUpdateObject(ctx, r.Client, &blueprintConfigMap); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -372,26 +372,6 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func (r *ImageBuilderImageReconciler) CreateOrUpdateObject(ctx context.Context, object client.Object) error {
-	logger := log.FromContext(ctx)
-	if err := r.Create(ctx, object); err != nil {
-		if errors.IsAlreadyExists(err) {
-			if err = r.Update(ctx, object); err != nil {
-				logger.Error(err, fmt.Sprintf("Could not update object %s/%s.", object.GetObjectKind().GroupVersionKind().Kind, object.GetName()))
-				return err
-			} else {
-				logger.Info(fmt.Sprintf("Object %s/%s updated", object.GetObjectKind().GroupVersionKind().Kind, object.GetName()))
-				return nil
-			}
-		} else {
-			logger.Error(err, fmt.Sprintf("Could not create object %s/%s.", object.GetObjectKind().GroupVersionKind().Kind, object.GetName()))
-			return err
-		}
-	}
-	logger.Info(fmt.Sprintf("Object %s/%s created", object.GetObjectKind(), object.GetName()))
-	return nil
 }
 
 func (r *ImageBuilderImageReconciler) DownloadTask(objectMeta metav1.ObjectMeta, compose_file string, destination string) tektonv1.Task {
