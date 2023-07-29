@@ -64,7 +64,7 @@ diun_pub_key_insecure = "true"
 `
 
 const waitScriptTemplate = `#!/bin/bash
-compose_id=$(jq '.build_id' -r /workspace/shared-volume/$(params.blueprintName)/compose.json)
+compose_id=$(jq '.build_id' -r /workspace/shared-volume/$(params.blueprintName)/${compose_file})
 while /usr/bin/curl "${api}/compose/queue" --silent | jq -r '.run[].id' | grep ${compose_id} || usr/bin/curl "${api}/compose/queue" --silent | jq -r '.new[].id' | grep ${compose_id}; do sleep 30; done
 /usr/bin/curl "${api}/compose/failed" --silent | jq -r '.failed[].id' | grep "${compose_id}" && echo "Compose ${compose_id} failed!" && exit 1
 /usr/bin/curl "${api}/compose/finished" --silent | jq -r --arg id "${composer_id}" '.finished[] | select (.id==$id)'
@@ -173,15 +173,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			Namespace: imageBuilderImage.Namespace,
 		},
 		Data: map[string]string{
-			imageSpec.Name: renderTemplateFromSpec(blueprintTemplate, imageSpec),
-		},
-	}
-	blueprintIsoConfigMap := corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-iso-blueprint", imageSpec.Name),
-			Namespace: imageBuilderImage.Namespace,
-		},
-		Data: map[string]string{
+			imageSpec.Name:                        renderTemplateFromSpec(blueprintTemplate, imageSpec),
 			fmt.Sprintf("%s-iso", imageSpec.Name): renderTemplateFromSpec(blueprintIsoTemplate, imageSpec),
 		},
 	}
@@ -190,14 +182,6 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			logger.Info("Main blueprint configmap already exists, skipping creation")
 		} else {
 			logger.Error(err, "Could not create main blueprint")
-			return ctrl.Result{}, err
-		}
-	}
-	if err := r.Create(ctx, &blueprintIsoConfigMap); err != nil {
-		if errors.IsAlreadyExists(err) {
-			logger.Info("Iso blueprint configmap already exists, skipping creation")
-		} else {
-			logger.Error(err, "Could not create iso blueprint")
 			return ctrl.Result{}, err
 		}
 	}
@@ -258,6 +242,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			return ctrl.Result{}, err
 		}
 	}
+
 	downloadTask := r.DownloadExtractCommitTask(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-download-extract-commit", req.Name),
 		Namespace: req.Namespace,
@@ -271,11 +256,35 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
+	isoComposeTask := r.IsoComposeTask(metav1.ObjectMeta{
+		Name:      fmt.Sprintf("%s-iso-compose", req.Name),
+		Namespace: req.Namespace,
+	})
+	if err := r.Create(ctx, &isoComposeTask); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Iso compose task already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create isocompose task")
+			return ctrl.Result{}, err
+		}
+	}
+	isoDownloadTask := r.DownloadTask(metav1.ObjectMeta{
+		Name:      fmt.Sprintf("%s-iso-download", req.Name),
+		Namespace: req.Namespace,
+	}, "compose-iso.json", "installer.iso")
+	if err := r.Create(ctx, &isoDownloadTask); err != nil {
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Iso download task already exists, skipping creation")
+		} else {
+			logger.Error(err, "Could not create isodownload task")
+			return ctrl.Result{}, err
+		}
+	}
 	// create commit pipeline and pipelinerun
 	imagePipeline := r.ImagePipeline(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-pipeline", req.Name),
 		Namespace: req.Namespace,
-	}, []tektonv1.Task{prepareTask, commitTask, downloadTask}, logger)
+	}, []tektonv1.Task{prepareTask, commitTask, downloadTask, isoComposeTask, isoDownloadTask}, logger)
 	if err := r.Create(ctx, &imagePipeline); err != nil {
 		if errors.IsAlreadyExists(err) {
 			logger.Info("Image generation pipeline already exists, skipping creation")
@@ -325,6 +334,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 					},
 				},
 			},
+			Status: tektonv1.PipelineRunSpecStatus("PipelineRunPending"),
 		},
 	}
 
@@ -338,6 +348,28 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return ctrl.Result{}, nil
+}
+
+
+func (r *ImageBuilderImageReconciler) DownloadTask(objectMeta metav1.ObjectMeta, compose_file string, destination string) tektonv1.Task {
+	task := tektonv1.Task{
+		ObjectMeta: objectMeta,
+		Spec: tektonv1.TaskSpec{
+			Workspaces: r.PipelineWorkspaces,
+			Params:     r.PipelineParams,
+			Steps: []tektonv1.Step{
+				{
+					Name:  "download",
+					Image: utilsImage,
+					Command: []string{
+						"/usr/bin/bash", "-c",
+						fmt.Sprintf("/usr/bin/curl $(params.apiEndpoint)/compose/image/$(/usr/bin/jq -r '.build_id' \"/workspace/shared-volume/$(params.blueprintName)/%s\") --output \"/workspace/shared-volume/$(params.blueprintName)/%s\" --verbose", compose_file, destination),
+					},
+				},
+			},
+		},
+	}
+	return task
 }
 
 func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav1.ObjectMeta, apiEndpoint string) tektonv1.Task {
@@ -432,6 +464,79 @@ func (r *ImageBuilderImageReconciler) CommitTask(objectMeta metav1.ObjectMeta) t
 						{
 							Name:  "api",
 							Value: "$(params.apiEndpoint)",
+						},
+						{
+							Name:  "compose_file",
+							Value: "compose.json",
+						},
+					},
+				},
+			},
+		},
+	}
+	return task
+}
+
+func (r *ImageBuilderImageReconciler) IsoComposeTask(objectMeta metav1.ObjectMeta) tektonv1.Task {
+	task := tektonv1.Task{
+		ObjectMeta: objectMeta,
+		Spec: tektonv1.TaskSpec{
+			Workspaces: r.PipelineWorkspaces,
+			Params:     r.PipelineParams,
+			Steps: []tektonv1.Step{
+				{
+					Name:  "push-blueprint",
+					Image: ubiImage,
+					Command: []string{
+						"/usr/bin/curl", "-H", "Content-Type: text/x-toml", "--data-binary", "@/workspace/blueprints/$(params.blueprintName)-iso", "$(params.apiEndpoint)/blueprints/new", "--silent",
+					},
+				},
+				{
+					Name:  "compose-json",
+					Image: ubiImage,
+					Command: []string{
+						"/usr/bin/bash", "-c",
+						`echo "{\"blueprint_name\":\"image-iso\",\"compose_type\":\"edge-simplified-installer\",\"ostree\":{\"ref\":\"rhel/9/x86_64/edge\",\"url\":\"http://$(getent hosts | grep pipeline | awk '{print $1}'):8000/repo\"}}" > /workspace/shared-volume/$(params.blueprintName)/ostree-compose.json`,
+					},
+				},
+				{
+					Name:  "start-compose",
+					Image: ubiImage,
+					Command: []string{
+						"/usr/bin/curl", "-H", "Content-Type: application/json", "--data-binary", "@workspace/shared-volume/$(params.blueprintName)/ostree-compose.json", "$(params.apiEndpoint)/compose", "--verbose", "--output", "/workspace/shared-volume/$(params.blueprintName)/compose-iso.json",
+					},
+				},
+				{
+					Name:   "wait-for-finish",
+					Image:  utilsImage,
+					Script: waitScriptTemplate,
+					Env: []corev1.EnvVar{
+						{
+							Name:  "api",
+							Value: "$(params.apiEndpoint)",
+						},
+						{
+							Name:  "compose_file",
+							Value: "compose-iso.json",
+						},
+					},
+				},
+			},
+			Sidecars: []tektonv1.Sidecar{
+				{
+					Name:  "ostree-webserver",
+					Image: ubiImage,
+					Command: []string{
+						"/usr/bin/bash", "-c",
+						"/usr/bin/python3 -m http.server --directory /workspace/shared-volume/$(params.blueprintName) 8000 > /dev/null",
+					},
+					ReadinessProbe: &corev1.Probe{
+						ProbeHandler: corev1.ProbeHandler{
+							Exec: &corev1.ExecAction{
+								Command: []string{
+									"/usr/bin/curl", "http://127.0.0.1:8000/repo",
+								},
+							},
 						},
 					},
 				},
