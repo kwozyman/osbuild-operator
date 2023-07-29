@@ -74,6 +74,14 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilder); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("Resource not found, must have been deleted")
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Service", "v1", imageBuilderLabel, req.Name); err != nil {
+				logger.Error(err, "Could not delete services")
+				return ctrl.Result{}, err
+			}
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "VirtualMachine", "kubevirt.io/v1", imageBuilderLabel, req.Name); err != nil {
+				logger.Error(err, "Could not delete vm")
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Unable to fetch ImageBuilder")
