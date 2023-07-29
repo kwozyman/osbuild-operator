@@ -42,6 +42,7 @@ import (
 
 const defaultSubscriptionSecretName = "osbuild-subscription-secret"
 const defaultImageBuilderPort int32 = 8080
+const imageBuilderLabel = "osbuild-operator-builder"
 
 // ImageBuilderReconciler reconciles a ImageBuilder object
 type ImageBuilderReconciler struct {
@@ -64,6 +65,10 @@ type ImageBuilderReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
 func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	labels := map[string]string{
+		imageBuilderLabel: req.Name,
+	}
 
 	var imageBuilder osbuildv1alpha1.ImageBuilder
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilder); err != nil {
@@ -102,8 +107,11 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	logger.Info("Building VM object")
-	logger.Info(cloudInitData(*subscriptionSecret, imageBuilder.Spec.SshKey))
-	vm := r.createVM(cloudInitData(*subscriptionSecret, imageBuilder.Spec.SshKey), imageBuilder.Name, imageBuilder.Namespace)
+	vm := r.createVM(cloudInitData(*subscriptionSecret, imageBuilder.Spec.SshKey), metav1.ObjectMeta{
+		Name:      imageBuilder.Name,
+		Namespace: imageBuilder.Namespace,
+		Labels:    labels,
+	})
 	logger.Info("Creating VM object")
 	if err := r.Create(ctx, &vm); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -114,7 +122,11 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	service := r.createVMService(servicePort, imageBuilder.Name, imageBuilder.Namespace)
+	service := r.createVMService(metav1.ObjectMeta{
+		Name:      imageBuilder.Name,
+		Namespace: imageBuilder.Namespace,
+		Labels:    labels,
+	}, servicePort)
 	logger.Info("Creating service object")
 	if err := r.Create(ctx, &service); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -128,12 +140,9 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (r *ImageBuilderReconciler) createVMService(port int32, name string, namespace string) corev1.Service {
+func (r *ImageBuilderReconciler) createVMService(objectMeta metav1.ObjectMeta, port int32) corev1.Service {
 	service := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
+		ObjectMeta: objectMeta,
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
 				{
@@ -142,7 +151,7 @@ func (r *ImageBuilderReconciler) createVMService(port int32, name string, namesp
 				},
 			},
 			Selector: map[string]string{
-				"vm.kubevirt.io/name": name,
+				"vm.kubevirt.io/name": objectMeta.Name,
 			},
 		},
 	}
@@ -201,8 +210,8 @@ runcmd:
 	return strings.ReplaceAll(renderedTemplate.String(), "\t", "    ")
 }
 
-func (r *ImageBuilderReconciler) createVM(cloudInitData string, name string, namespace string) kubevirt.VirtualMachine {
-	rootVolumeName := fmt.Sprintf("%s-vm-volume", name)
+func (r *ImageBuilderReconciler) createVM(cloudInitData string, objectMeta metav1.ObjectMeta) kubevirt.VirtualMachine {
+	rootVolumeName := fmt.Sprintf("%s-vm-volume", objectMeta.Name)
 
 	dataVolumeTemplateSpec := kubevirt.DataVolumeTemplateSpec{}
 	dataVolumeTemplateSpec.Kind = "DataVolume"
@@ -224,7 +233,7 @@ func (r *ImageBuilderReconciler) createVM(cloudInitData string, name string, nam
 
 	vmInstanceTemplateSpec := kubevirt.VirtualMachineInstanceTemplateSpec{}
 	vmInstanceTemplateSpec.ObjectMeta.Labels = map[string]string{
-		"eci": fmt.Sprintf("%s-image-builder", name),
+		"eci": fmt.Sprintf("%s-image-builder", objectMeta.Name),
 	}
 	vmInstanceTemplateSpec.ObjectMeta.Annotations = map[string]string{
 		"vm.kubevirt.io/flavor":   "small",
@@ -319,10 +328,7 @@ func (r *ImageBuilderReconciler) createVM(cloudInitData string, name string, nam
 			APIVersion: "kubevirt.io/v1",
 			Kind:       "VirtualMachine",
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
+		ObjectMeta: objectMeta,
 		Spec: kubevirt.VirtualMachineSpec{
 			DataVolumeTemplates: []kubevirt.DataVolumeTemplateSpec{
 				dataVolumeTemplateSpec,
