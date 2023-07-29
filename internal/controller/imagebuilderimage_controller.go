@@ -39,6 +39,7 @@ import (
 
 const ubiImage = "registry.access.redhat.com/ubi9:latest"
 const utilsImage = "quay.io/cgament/composer-cli"
+const imageBuilderImageLabel = "osbuild-operator-image"
 const defaultBlueprintTemplate = `name = "{{ .Name }}"
 version = "0.0.1"
 modules = []
@@ -95,7 +96,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	logger := log.FromContext(ctx)
 
 	labels := map[string]string{
-		"osbuild-operator": req.Name,
+		imageBuilderImageLabel: req.Name,
 	}
 
 	// get new ImageBuilderImage object
@@ -103,16 +104,16 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilderImage); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("Resource not found, must have been deleted")
-			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "PipelineRun", "tekton.dev/v1", "osbuild-operator", req.Name); err != nil {
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "PipelineRun", "tekton.dev/v1", imageBuilderImageLabel, req.Name); err != nil {
 				return ctrl.Result{}, err
 			}
-			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Pipeline", "tekton.dev/v1", "osbuild-operator", req.Name); err != nil {
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Pipeline", "tekton.dev/v1", imageBuilderImageLabel, req.Name); err != nil {
 				return ctrl.Result{}, err
 			}
-			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Task", "tekton.dev/v1", "osbuild-operator", req.Name); err != nil {
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Task", "tekton.dev/v1", imageBuilderImageLabel, req.Name); err != nil {
 				return ctrl.Result{}, err
 			}
-			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "ConfigMap", "v1", "osbuild-operator", req.Name); err != nil {
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "ConfigMap", "v1", imageBuilderImageLabel, req.Name); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
