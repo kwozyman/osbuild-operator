@@ -94,6 +94,10 @@ type ImageBuilderImageReconciler struct {
 func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	labels := map[string]string{
+		"osbuild-operator": req.Name,
+	}
+
 	// get new ImageBuilderImage object
 	var imageBuilderImage osbuildv1alpha1.ImageBuilderImage
 	if err := r.Get(ctx, req.NamespacedName, &imageBuilderImage); err != nil {
@@ -168,22 +172,23 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// store blueprints in configmaps
 	blueprintConfigMap := corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "ConfigMap",
+			APIVersion: "v1",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-blueprint", imageSpec.Name),
 			Namespace: imageBuilderImage.Namespace,
+			Labels:    labels,
 		},
 		Data: map[string]string{
 			imageSpec.Name:                        renderTemplateFromSpec(blueprintTemplate, imageSpec),
 			fmt.Sprintf("%s-iso", imageSpec.Name): renderTemplateFromSpec(blueprintIsoTemplate, imageSpec),
 		},
 	}
-	if err := r.Create(ctx, &blueprintConfigMap); err != nil {
-		if errors.IsAlreadyExists(err) {
-			logger.Info("Main blueprint configmap already exists, skipping creation")
-		} else {
-			logger.Error(err, "Could not create main blueprint")
-			return ctrl.Result{}, err
-		}
+
+	if err := r.CreateOrUpdateObject(ctx, &blueprintConfigMap); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	//persistentVolume used for inter-task communication
@@ -220,6 +225,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	prepareTask := r.PrepareSharedVolumeTask(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-prepare-volume", req.Name),
 		Namespace: req.Namespace,
+		Labels:    labels,
 	})
 	if err := r.Create(ctx, &prepareTask); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -233,6 +239,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	commitTask := r.CommitTask(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-generate-commit", req.Name),
 		Namespace: req.Namespace,
+		Labels:    labels,
 	})
 	if err := r.Create(ctx, &commitTask); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -246,6 +253,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	downloadTask := r.DownloadExtractCommitTask(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-download-extract-commit", req.Name),
 		Namespace: req.Namespace,
+		Labels:    labels,
 	}, apiUrl)
 	if err := r.Create(ctx, &downloadTask); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -259,6 +267,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	isoComposeTask := r.IsoComposeTask(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-iso-compose", req.Name),
 		Namespace: req.Namespace,
+		Labels:    labels,
 	})
 	if err := r.Create(ctx, &isoComposeTask); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -271,6 +280,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	isoDownloadTask := r.DownloadTask(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-iso-download", req.Name),
 		Namespace: req.Namespace,
+		Labels:    labels,
 	}, "compose-iso.json", "installer.iso")
 	if err := r.Create(ctx, &isoDownloadTask); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -284,6 +294,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	imagePipeline := r.ImagePipeline(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-pipeline", req.Name),
 		Namespace: req.Namespace,
+		Labels:    labels,
 	}, []tektonv1.Task{prepareTask, commitTask, downloadTask, isoComposeTask, isoDownloadTask}, logger)
 	if err := r.Create(ctx, &imagePipeline); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -297,6 +308,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-pipeline-run", req.Name),
 			Namespace: req.Namespace,
+			Labels:    labels,
 		},
 		Spec: tektonv1.PipelineRunSpec{
 			PipelineRef: &tektonv1.PipelineRef{
@@ -350,6 +362,25 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	return ctrl.Result{}, nil
 }
 
+func (r *ImageBuilderImageReconciler) CreateOrUpdateObject(ctx context.Context, object client.Object) error {
+	logger := log.FromContext(ctx)
+	if err := r.Create(ctx, object); err != nil {
+		if errors.IsAlreadyExists(err) {
+			if err = r.Update(ctx, object); err != nil {
+				logger.Error(err, fmt.Sprintf("Could not update object %s/%s.", object.GetObjectKind().GroupVersionKind().Kind, object.GetName()))
+				return err
+			} else {
+				logger.Info(fmt.Sprintf("Object %s/%s updated", object.GetObjectKind().GroupVersionKind().Kind, object.GetName()))
+				return nil
+			}
+		} else {
+			logger.Error(err, fmt.Sprintf("Could not create object %s/%s.", object.GetObjectKind().GroupVersionKind().Kind, object.GetName()))
+			return err
+		}
+	}
+	logger.Info(fmt.Sprintf("Object %s/%s created", object.GetObjectKind(), object.GetName()))
+	return nil
+}
 
 func (r *ImageBuilderImageReconciler) DownloadTask(objectMeta metav1.ObjectMeta, compose_file string, destination string) tektonv1.Task {
 	task := tektonv1.Task{
@@ -404,6 +435,10 @@ func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav
 func (r *ImageBuilderImageReconciler) PrepareSharedVolumeTask(objectMeta metav1.ObjectMeta) tektonv1.Task {
 	task := tektonv1.Task{
 		ObjectMeta: objectMeta,
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Task",
+			APIVersion: "tekton.dev/v1",
+		},
 		Spec: tektonv1.TaskSpec{
 			Workspaces: r.PipelineWorkspaces,
 			Params:     r.PipelineParams,
