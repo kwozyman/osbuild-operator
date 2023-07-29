@@ -47,7 +47,9 @@ const imageBuilderLabel = "osbuild-operator-builder"
 // ImageBuilderReconciler reconciles a ImageBuilder object
 type ImageBuilderReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme      *runtime.Scheme
+	servicePort int32
+	sshKey      string
 }
 
 //+kubebuilder:rbac:groups=osbuild.rh-ecosystem-edge.io,resources=imagebuilders,verbs=get;list;watch;create;update;patch;delete
@@ -92,12 +94,11 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	var servicePort int32
 	if imageBuilder.Spec.ServicePort == 0 {
 		logger.Info(fmt.Sprintf("spec.servicePort is not set, using default %v", defaultImageBuilderPort))
-		servicePort = defaultImageBuilderPort
+		r.servicePort = defaultImageBuilderPort
 	} else {
-		servicePort = imageBuilder.Spec.ServicePort
+		r.servicePort = imageBuilder.Spec.ServicePort
 	}
 
 	var subscriptionSecretName string //this is where we get the RH sub secret
@@ -118,11 +119,12 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	r.sshKey = imageBuilder.Spec.SshKey
 	cloudConfigSecret := r.cloudInitData(metav1.ObjectMeta{
 		Name:      fmt.Sprintf("%s-cloudconfig", req.Name),
 		Namespace: req.Namespace,
 		Labels:    labels,
-	}, *subscriptionSecret, imageBuilder.Spec.SshKey)
+	}, *subscriptionSecret)
 	if err := r.Client.Create(ctx, &cloudConfigSecret); err != nil {
 		if errors.IsAlreadyExists(err) {
 			logger.Info("Secret already exists")
@@ -152,7 +154,7 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		Name:      imageBuilder.Name,
 		Namespace: imageBuilder.Namespace,
 		Labels:    labels,
-	}, servicePort)
+	})
 	logger.Info("Creating service object")
 	if err := r.Create(ctx, &service); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -166,14 +168,14 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-func (r *ImageBuilderReconciler) createVMService(objectMeta metav1.ObjectMeta, port int32) corev1.Service {
+func (r *ImageBuilderReconciler) createVMService(objectMeta metav1.ObjectMeta) corev1.Service {
 	service := corev1.Service{
 		ObjectMeta: objectMeta,
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
 				{
 					Protocol: "TCP",
-					Port:     int32(port),
+					Port:     int32(r.servicePort),
 				},
 			},
 			Selector: map[string]string{
@@ -185,7 +187,7 @@ func (r *ImageBuilderReconciler) createVMService(objectMeta metav1.ObjectMeta, p
 	return service
 }
 
-func (r *ImageBuilderReconciler) cloudInitData(objectMeta metav1.ObjectMeta, subSecret corev1.Secret, sshKey string) corev1.Secret {
+func (r *ImageBuilderReconciler) cloudInitData(objectMeta metav1.ObjectMeta, subSecret corev1.Secret) corev1.Secret {
 
 	type templateValues struct {
 		Username string
@@ -195,7 +197,7 @@ func (r *ImageBuilderReconciler) cloudInitData(objectMeta metav1.ObjectMeta, sub
 	values := templateValues{
 		Username: string(subSecret.Data["username"]),
 		Password: string(subSecret.Data["password"]),
-		SshKey:   sshKey,
+		SshKey:   r.sshKey,
 	}
 	const configTemplate = `#cloud-config
 user: cloud-user
