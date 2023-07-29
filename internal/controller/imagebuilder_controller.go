@@ -124,8 +124,12 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		Labels:    labels,
 	}, *subscriptionSecret, imageBuilder.Spec.SshKey)
 	if err := r.Client.Create(ctx, &cloudConfigSecret); err != nil {
-		logger.Error(err, "Could not create secret")
-		return ctrl.Result{}, err
+		if errors.IsAlreadyExists(err) {
+			logger.Info("Secret already exists")
+		} else {
+			logger.Error(err, "Could not create secret")
+			return ctrl.Result{}, err
+		}
 	}
 
 	logger.Info("Building VM object")
