@@ -82,6 +82,10 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				logger.Error(err, "Could not delete vm")
 				return ctrl.Result{}, err
 			}
+			if err := DeleteAllObjectsWithLabel(ctx, r.Client, "Secret", "v1", imageBuilderLabel, req.Name); err != nil {
+				logger.Error(err, "Could not delete vm")
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Unable to fetch ImageBuilder")
@@ -114,12 +118,22 @@ func (r *ImageBuilderReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	cloudConfigSecret := r.cloudInitData(metav1.ObjectMeta{
+		Name:      fmt.Sprintf("%s-cloudconfig", req.Name),
+		Namespace: req.Namespace,
+		Labels:    labels,
+	}, *subscriptionSecret, imageBuilder.Spec.SshKey)
+	if err := r.Client.Create(ctx, &cloudConfigSecret); err != nil {
+		logger.Error(err, "Could not create secret")
+		return ctrl.Result{}, err
+	}
+
 	logger.Info("Building VM object")
-	vm := r.createVM(cloudInitData(*subscriptionSecret, imageBuilder.Spec.SshKey), metav1.ObjectMeta{
+	vm := r.createVM(metav1.ObjectMeta{
 		Name:      imageBuilder.Name,
 		Namespace: imageBuilder.Namespace,
 		Labels:    labels,
-	})
+	}, cloudConfigSecret)
 	logger.Info("Creating VM object")
 	if err := r.Create(ctx, &vm); err != nil {
 		if errors.IsAlreadyExists(err) {
@@ -167,7 +181,8 @@ func (r *ImageBuilderReconciler) createVMService(objectMeta metav1.ObjectMeta, p
 	return service
 }
 
-func cloudInitData(subSecret corev1.Secret, key string) string {
+func (r *ImageBuilderReconciler) cloudInitData(objectMeta metav1.ObjectMeta, subSecret corev1.Secret, sshKey string) corev1.Secret {
+
 	type templateValues struct {
 		Username string
 		Password string
@@ -176,7 +191,7 @@ func cloudInitData(subSecret corev1.Secret, key string) string {
 	values := templateValues{
 		Username: string(subSecret.Data["username"]),
 		Password: string(subSecret.Data["password"]),
-		SshKey:   key,
+		SshKey:   sshKey,
 	}
 	const configTemplate = `#cloud-config
 user: cloud-user
@@ -215,10 +230,18 @@ runcmd:
 	}
 	var renderedTemplate bytes.Buffer
 	config.Execute(&renderedTemplate, values)
-	return strings.ReplaceAll(renderedTemplate.String(), "\t", "    ")
+	secret := corev1.Secret{
+		ObjectMeta: objectMeta,
+		Type:       corev1.SecretType("Opaque"),
+		StringData: map[string]string{
+			"userdata": strings.ReplaceAll(renderedTemplate.String(), "\t", "    "),
+		},
+	}
+
+	return secret
 }
 
-func (r *ImageBuilderReconciler) createVM(cloudInitData string, objectMeta metav1.ObjectMeta) kubevirt.VirtualMachine {
+func (r *ImageBuilderReconciler) createVM(objectMeta metav1.ObjectMeta, cloudSecret corev1.Secret) kubevirt.VirtualMachine {
 	rootVolumeName := fmt.Sprintf("%s-vm-volume", objectMeta.Name)
 
 	dataVolumeTemplateSpec := kubevirt.DataVolumeTemplateSpec{}
@@ -325,7 +348,9 @@ func (r *ImageBuilderReconciler) createVM(cloudInitData string, objectMeta metav
 			Name: "cloudinitdisk",
 			VolumeSource: kubevirt.VolumeSource{
 				CloudInitNoCloud: &kubevirt.CloudInitNoCloudSource{
-					UserData: cloudInitData,
+					UserDataSecretRef: &corev1.LocalObjectReference{
+						Name: fmt.Sprintf("%s-cloudconfig", objectMeta.Name),
+					},
 				},
 			},
 		},
