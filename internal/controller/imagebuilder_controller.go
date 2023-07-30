@@ -55,6 +55,9 @@ type ImageBuilderReconciler struct {
 //+kubebuilder:rbac:groups=osbuild.rh-ecosystem-edge.io,resources=imagebuilders,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=osbuild.rh-ecosystem-edge.io,resources=imagebuilders/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=osbuild.rh-ecosystem-edge.io,resources=imagebuilders/finalizers,verbs=update
+//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;delete
+//+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;create;delete
+//+kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;create;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
