@@ -523,13 +523,8 @@ func (r *ImageBuilderImageReconciler) WebDeployment(objectMeta metav1.ObjectMeta
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "data-pv",
-									MountPath: "/usr/share/nginx/html/repo",
-									SubPath:   fmt.Sprintf("%s/repo", imageName),
-								},
-								{
-									Name:      "data-pv",
-									MountPath: "/usr/share/nginx/html/installer.iso",
-									SubPath:   fmt.Sprintf("%s/installer.iso", imageName),
+									MountPath: "/usr/share/nginx/html/",
+									SubPath:   imageName,
 								},
 							},
 						},
