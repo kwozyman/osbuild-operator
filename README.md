@@ -1,80 +1,116 @@
 # osbuild-operator
-// TODO(user): Add simple overview of use/purpose
+Operator for Openshift designed to simplitfy usage of [Image Builder](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/composing_a_customized_rhel_system_image/index).
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Even though a comprehensive [OSBuild Ansible collection](https://github.com/redhat-cop/infra.osbuild) exists, there is still a gap in running OSBuild on top of Openshift. This operator provides an opinionated way to simplify image generatation using an Openshift cluster.
 
 ## Getting Started
-You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
-**Note:** Your controller will automatically use the current context in your kubeconfig file (i.e. whatever cluster `kubectl cluster-info` shows).
+You’ll need an Openshift cluster to run against with enough available resources to start a 4Gi / 2 core virtual machine. Please note if your cluster is already running inside virtual machines, you will need nested virtualization.
 
-### Running on the cluster
-1. Install Instances of Custom Resources:
+[Openshift Virtualization](https://docs.openshift.com/container-platform/4.13/virt/about-virt.html) and [Openshift Pipelines](https://docs.openshift.com/container-platform/4.13/cicd/pipelines/op-release-notes.html) are required in your cluster.
 
-```sh
-kubectl apply -f config/samples/
-```
+### Running on the cluster using prebuilt image
 
-2. Build and push your image to the location specified by `IMG`:
+If you just want to run the operator using the prebuilt image at `quay.io/cgament/osbuild-operator:latest`, you just need to run:
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/osbuild-operator:tag
+make deploy
 ```
 
-3. Deploy the controller to the cluster with the image specified by `IMG`:
+This will create a `osbuild-operator-controller-manager` deployment in the `osbuild-operator-system` namespace and install the required CRDs.
 
-```sh
-make deploy IMG=<some-registry>/osbuild-operator:tag
+If you want to use a custom image:
+
+```
+IMG=<registry>/<image>:<tag> make deploy
 ```
 
-### Uninstall CRDs
-To delete the CRDs from the cluster:
-
-```sh
-make uninstall
-```
-
-### Undeploy controller
-UnDeploy the controller from the cluster:
+### Uninstallation
 
 ```sh
 make undeploy
 ```
 
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+## Test it Out
 
-### How it works
-This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/).
+There are two CRDs at the moment:
 
-It uses [Controllers](https://kubernetes.io/docs/concepts/architecture/controller/),
-which provide a reconcile function responsible for synchronizing resources until the desired state is reached on the cluster.
+1. ImageBuilder
 
-### Test It Out
-1. Install the CRDs into the cluster:
+```yaml
+apiVersion: osbuild.rh-ecosystem-edge.io/v1alpha1
+kind: ImageBuilder
+metadata:
+  name: <name>
+spec:
+  sshKey: "<ssh-key>"    # optional
+  subscriptionSecret:    # optional; default=osbuild-subscription-secret
+  servicePort:           # optional; default=8080
+```
 
+`ImageBuilder` is a namespaced resource, with the following fields:
+  * `spec.sshKey`: optional, the key to be used for accessing the virtual machine with the user `cloud-user`
+  * `spec.subscriptionSecret`: optional, default is `osbuild-subscription-secret`, the name of the secret that holds the Red Hat subscription username and password; must be in the same namespace as `ImageBuilder` resource
+  * `spec.servicePort`: optional, defaults to `8080`, the port on which the osbuild service will be exposed
+
+Creating this resource will run and configure a virtual machine that runs OSBuild and exposes the API via a Openshift service.
+
+Deleting this resource will cleanup and delete all the resources associated with it.
+
+2. ImageBuilderImage
+
+```yaml
+apiVersion: osbuild.rh-ecosystem-edge.io/v1alpha1
+kind: ImageBuilderImage
+metadata:
+  name: image
+spec:
+  imageBuilder: <imagebuilder>          # optional
+  userName: "<user-name>"               # optional; default=root
+  sshKey: "<ssh-key>"                   # optional
+  installationDevice: "<device>"        # optional
+  fdoManufacturingServerUrl: "<url>"    # optional
+  persistentVolumeName: <pvc-name>      # optional; default=<name>-data
+  blueprintTemplate: "<go-template>"    # optional; specify a Go Template for the commit blueprint
+  blueprintIsoTemplate: "<go-template>" # optional; specify a Go Temaplte for the installer iso blueprint
+```
+
+`ImageBuilderImage` is a namespaced resource, with the following fields:
+  * `spec.imageBuilder`: optional, name the of `ImageBuilder` service to be used. If missing, the operator will try to use an existing resource in the current namespace
+  * `spec.userName`: optional, defaults to `root`, user to embed in the image
+  * `spec.sshKey`: optional, the ssh key used for accesing the image for the specified user
+  * `spec.persistentVolumeName`: optional, defaults to `<ImageBuilderImage.name>-data`. the volume used for storing generated images and temporary data. The PVC needs to exist, the operator will not create a new one.
+  * `spec.installationDevice`: optional, the installation device; required for the installation iso
+  * `spec.fdoManufacturingServerUrl`: optional, the FDO Manufacturing server url; required for `simplified-installer` target
+  * `spec.blueprintTemplate`: optional, a Go Template can be specified for the commit blueprint using the Spec variables. The default is usually good enough.
+  * `spec.blueprintIsoTemplate`: optional, a Go Template can be specified for the installation blueprint using the Spec variables. The default is usually good enough.
+
+Creating this resource will generate and create several Openshift objects, including a `Pipeline` and a paused `PipelineRun`. Starting this pipeline will generate an ostree commit and the associated installation iso. The artifacts can be accessed as follows:
+
+```sh
+url=$(oc get routes.route.openshift.io --selector osbuild-operator-image -o json | jq -r '.items[].spec.host')
+curl -LO "${url}/installation.iso"
+curl -L "${url}/repo/"
+```
+
+## Development
+
+Build and push your image to the location specified by `IMG`:
+
+```sh
+make docker-build docker-push IMG=<registry>/<image>:<tag>
+```
+
+To install the CRDs from the cluster:
 ```sh
 make install
 ```
 
-2. Run your controller (this will run in the foreground, so switch to a new terminal if you want to leave it running):
+To delete the CRDs from the cluster:
 
 ```sh
-make run
+make uninstall
 ```
-
-**NOTE:** You can also run this in one step by running: `make install run`
-
-### Modifying the API definitions
-If you are editing the API definitions, generate the manifests such as CRs or CRDs using:
-
-```sh
-make manifests
-```
-
-**NOTE:** Run `make --help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
@@ -91,4 +127,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
