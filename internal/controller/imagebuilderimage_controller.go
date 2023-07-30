@@ -279,7 +279,7 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		Name:      fmt.Sprintf("%s-download-extract-commit", req.Name),
 		Namespace: req.Namespace,
 		Labels:    labels,
-	}, apiUrl)
+	})
 	if err := r.Create(ctx, &downloadTask); err != nil {
 		if errors.IsAlreadyExists(err) {
 			logger.Info("Download and extract task already exists, skipping creation")

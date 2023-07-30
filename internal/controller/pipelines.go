@@ -29,7 +29,7 @@ func (r *ImageBuilderImageReconciler) DownloadTask(objectMeta metav1.ObjectMeta,
 	return task
 }
 
-func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav1.ObjectMeta, apiEndpoint string) tektonv1.Task {
+func (r *ImageBuilderImageReconciler) DownloadExtractCommitTask(objectMeta metav1.ObjectMeta) tektonv1.Task {
 	task := tektonv1.Task{
 		ObjectMeta: objectMeta,
 		Spec: tektonv1.TaskSpec{
