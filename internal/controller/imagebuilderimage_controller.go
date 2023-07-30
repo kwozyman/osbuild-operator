@@ -502,8 +502,8 @@ func (r *ImageBuilderImageReconciler) WebDeployment(objectMeta metav1.ObjectMeta
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "data-pv",
-									MountPath: "/usr/share/nginx/html/ostree",
-									SubPath:   "repo",
+									MountPath: "/usr/share/nginx/html/repo",
+									SubPath:   fmt.Sprintf("%s/repo", imageName),
 								},
 								{
 									Name:      "data-pv",
