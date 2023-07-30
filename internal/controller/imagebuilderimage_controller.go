@@ -43,6 +43,7 @@ import (
 const ubiImage = "registry.access.redhat.com/ubi9:latest"
 const utilsImage = "quay.io/cgament/composer-cli"
 const imageBuilderImageLabel = "osbuild-operator-image"
+const defaultIsoTarget = "edge-simplified-installer"
 const defaultBlueprintTemplate = `name = "{{ .Name }}"
 version = "0.0.1"
 modules = []
@@ -59,12 +60,14 @@ modules = []
 groups = []
 distro = ""
 
+{{ if eq $.IsoTarget "edge-simplified-installer" }}
 [customizations]
 installation_device = "{{ .InstallationDevice }}"
 
 [customizations.fdo]
 manufacturing_server_url = "{{ .FdoManufacturingServerUrl }}"
 diun_pub_key_insecure = "true"
+{{ end }}
 `
 
 const waitScriptTemplate = `#!/bin/bash
@@ -80,6 +83,7 @@ type ImageBuilderImageReconciler struct {
 	Scheme             *runtime.Scheme
 	PipelineWorkspaces []tektonv1.WorkspaceDeclaration
 	PipelineParams     tektonv1.ParamSpecs
+	IsoTarget          string
 }
 
 //+kubebuilder:rbac:groups=osbuild.rh-ecosystem-edge.io,resources=imagebuilderimages,verbs=get;list;watch;create;update;patch;delete
@@ -140,6 +144,15 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		logger.Error(err, "Unable to fetch ImageBuilderImage")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// installer compose type
+	if imageBuilderImage.Spec.IsoTarget == "" {
+		logger.Info("No installer target specified, using default")
+		imageBuilderImage.Spec.IsoTarget = defaultIsoTarget
+		r.IsoTarget = defaultIsoTarget
+	} else {
+		r.IsoTarget = defaultIsoTarget
 	}
 
 	// to what ImageBuilder are we tying this?

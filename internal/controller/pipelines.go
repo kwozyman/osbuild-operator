@@ -157,7 +157,13 @@ func (r *ImageBuilderImageReconciler) IsoComposeTask(objectMeta metav1.ObjectMet
 					Image: ubiImage,
 					Command: []string{
 						"/usr/bin/bash", "-c",
-						`echo "{\"blueprint_name\":\"image-iso\",\"compose_type\":\"edge-simplified-installer\",\"ostree\":{\"ref\":\"rhel/9/x86_64/edge\",\"url\":\"http://$(getent hosts | grep pipeline | awk '{print $1}'):8000/repo\"}}" > /workspace/shared-volume/$(params.blueprintName)/ostree-compose.json`,
+						`echo "{\"blueprint_name\":\"image-iso\",\"compose_type\":\"${target}\",\"ostree\":{\"ref\":\"rhel/9/x86_64/edge\",\"url\":\"http://$(getent hosts | grep pipeline | awk '{print $1}'):8000/repo\"}}" > /workspace/shared-volume/$(params.blueprintName)/ostree-compose.json`,
+					},
+					Env: []corev1.EnvVar{
+						{
+							Name:  "target",
+							Value: r.IsoTarget,
+						},
 					},
 				},
 				{

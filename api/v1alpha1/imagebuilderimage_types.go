@@ -36,6 +36,7 @@ type ImageBuilderImageSpec struct {
 	BlueprintIsoTemplate      string `json:"blueprintIsoTemplate,omitempty"`
 	ImageBuilder              string `json:"imageBuilder,omitempty"`
 	SharedVolume              string `json:"persistentVolumeName,omitempty"`
+	IsoTarget                 string `json:"isoTarget,omitempty"`
 }
 
 // ImageBuilderImageStatus defines the observed state of ImageBuilderImage

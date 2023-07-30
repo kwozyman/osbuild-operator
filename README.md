@@ -68,6 +68,7 @@ spec:
   imageBuilder: <imagebuilder>          # optional
   userName: "<user-name>"               # optional; default=root
   sshKey: "<ssh-key>"                   # optional
+  isoTarget: "<target>"                 # optional; default=edge-installer
   installationDevice: "<device>"        # optional
   fdoManufacturingServerUrl: "<url>"    # optional
   persistentVolumeName: <pvc-name>      # optional; default=<name>-data
@@ -80,8 +81,9 @@ spec:
   * `spec.userName`: optional, defaults to `root`, user to embed in the image
   * `spec.sshKey`: optional, the ssh key used for accesing the image for the specified user
   * `spec.persistentVolumeName`: optional, defaults to `<ImageBuilderImage.name>-data`. the volume used for storing generated images and temporary data. The PVC needs to exist, the operator will not create a new one.
-  * `spec.installationDevice`: optional, the installation device; required for the installation iso
-  * `spec.fdoManufacturingServerUrl`: optional, the FDO Manufacturing server url; required for `simplified-installer` target
+  * `spec.isoTarget`: optional, defaults to `edge-installer`. Can be `edge-installer` or `edge-simplified-installer` for FDO
+  * `spec.installationDevice`: optional, the installation device; required `edge-simplified-installer`
+  * `spec.fdoManufacturingServerUrl`: optional, the FDO Manufacturing server url; required for `edge-simplified-installer` target
   * `spec.blueprintTemplate`: optional, a Go Template can be specified for the commit blueprint using the Spec variables. The default is usually good enough.
   * `spec.blueprintIsoTemplate`: optional, a Go Template can be specified for the installation blueprint using the Spec variables. The default is usually good enough.
 
