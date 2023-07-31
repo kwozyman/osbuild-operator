@@ -1,5 +1,5 @@
 # osbuild-operator
-Operator for Openshift designed to simplitfy usage of [Image Builder](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/composing_a_customized_rhel_system_image/index).
+Operator for Openshift designed to simplify usage of [Image Builder](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/composing_a_customized_rhel_system_image/index).
 
 ## Description
 Even though a comprehensive [OSBuild Ansible collection](https://github.com/redhat-cop/infra.osbuild) exists, there is still a gap in running OSBuild on top of Openshift. This operator provides an opinionated way to simplify image generatation using an Openshift cluster.
