@@ -44,6 +44,7 @@ const ubiImage = "registry.access.redhat.com/ubi9:latest"
 const utilsImage = "quay.io/cgament/composer-cli"
 const imageBuilderImageLabel = "osbuild-operator-image"
 const defaultIsoTarget = "edge-simplified-installer"
+const defaultUserName = "root"
 const defaultBlueprintTemplate = `name = "{{ .Name }}"
 version = "0.0.1"
 modules = []
@@ -198,6 +199,14 @@ func (r *ImageBuilderImageReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	imageSpec := imageBuilderImage.Spec
 	if imageSpec.Name == "" {
 		imageSpec.Name = imageBuilderImage.Name
+	}
+
+	// use default username
+	if imageBuilderImage.Spec.UserName == "" {
+		logger.Info("No defined spec.userName, using root as default")
+		imageSpec.UserName = defaultUserName
+	} else {
+		imageSpec.UserName = imageBuilderImage.Spec.UserName
 	}
 
 	// templates used for blueprints
