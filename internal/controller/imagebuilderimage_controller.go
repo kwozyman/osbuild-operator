@@ -43,7 +43,7 @@ import (
 const ubiImage = "registry.access.redhat.com/ubi9:latest"
 const utilsImage = "quay.io/cgament/composer-cli"
 const imageBuilderImageLabel = "osbuild-operator-image"
-const defaultIsoTarget = "edge-simplified-installer"
+const defaultIsoTarget = "edge-installer"
 const defaultBlueprintTemplate = `name = "{{ .Name }}"
 version = "0.0.1"
 modules = []
