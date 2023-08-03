@@ -53,6 +53,19 @@ spec:
   * `spec.subscriptionSecret`: optional, default is `osbuild-subscription-secret`, the name of the secret that holds the Red Hat subscription username and password; must be in the same namespace as `ImageBuilder` resource
   * `spec.servicePort`: optional, defaults to `8080`, the port on which the osbuild service will be exposed
 
+A simple basic-auth secret for the `osbuild-subscription-secret` works:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: osbuild-subscription-secret
+type: kubernetes.io/basic-auth
+stringData:
+  username: # required field for kubernetes.io/basic-auth
+  password: # required field for kubernetes.io/basic-auth
+```
+
 Creating this resource will run and configure a virtual machine that runs OSBuild and exposes the API via a Openshift service.
 
 Deleting this resource will cleanup and delete all the resources associated with it.
