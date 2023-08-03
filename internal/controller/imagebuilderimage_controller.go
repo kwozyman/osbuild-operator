@@ -507,8 +507,8 @@ func (r *ImageBuilderImageReconciler) WebDeployment(objectMeta metav1.ObjectMeta
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  "nginx",
-							Image: "docker.io/nginxinc/nginx-unprivileged",
+							Name:  "httpd",
+							Image: "registry.redhat.io/rhel9/httpd-24:latest",
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("500m"),
@@ -523,7 +523,7 @@ func (r *ImageBuilderImageReconciler) WebDeployment(objectMeta metav1.ObjectMeta
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "data-pv",
-									MountPath: "/usr/share/nginx/html/",
+									MountPath: "/var/www/html/",
 									SubPath:   imageName,
 								},
 							},
